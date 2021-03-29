@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using System.Reflection;
 using Netch.Utils;
 
 namespace Netch.Models
@@ -270,7 +271,7 @@ namespace Netch.Models
 
         public void Set(Setting value)
         {
-            foreach (var p in typeof(Setting).GetProperties())
+            foreach (var p in typeof(Setting).GetProperties(BindingFlags.Public | BindingFlags.Instance ^ BindingFlags.DeclaredOnly))
                 p.SetValue(this, p.GetValue(value));
         }
     }

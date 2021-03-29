@@ -1,17 +1,21 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Reactive.Disposables;
 using System.Windows.Forms;
 using Netch.Models;
 using Netch.Properties;
 using Netch.Utils;
+using Netch.ViewModels;
+using ReactiveUI;
 
 namespace Netch.Forms
 {
-    public partial class SettingForm : Form
+    public partial class SettingForm : Form, IViewFor<Setting>
     {
         private readonly Dictionary<Control, Func<string, bool>> _checkActions = new();
 
@@ -23,27 +27,48 @@ namespace Netch.Forms
             Icon = Resources.icon;
             i18N.TranslateForm(this);
 
+            ViewModel = Global.Settings.Clone();
+
             #region General
 
-            BindTextBox<ushort>(Socks5PortTextBox,
-                p => p.ToString() != HTTPPortTextBox.Text,
-                p => Global.Settings.Socks5LocalPort = p,
-                Global.Settings.Socks5LocalPort);
+            ushort CheckPorts(Control sender, ushort defaultValue)
+            {
+                var http = HTTPPortTextBox;
+                var socks = Socks5PortTextBox;
+                if (http.Text == socks.Text)
+                {
+                    Utils.Utils.ChangeControlForeColor(http, Color.Red);
+                    Utils.Utils.ChangeControlForeColor(socks, Color.Red);
+                    return defaultValue;
+                }
 
-            BindTextBox<ushort>(HTTPPortTextBox,
-                p => p.ToString() != Socks5PortTextBox.Text,
-                p => Global.Settings.HTTPLocalPort = p,
-                Global.Settings.HTTPLocalPort);
+                return ushort.TryParse(sender.Text, out var p) ? p : defaultValue;
+            }
 
-            BindCheckBox(AllowDevicesCheckBox,
-                c => Global.Settings.LocalAddress = AllowDevicesCheckBox.Checked ? "0.0.0.0" : "127.0.0.1",
-                Global.Settings.LocalAddress switch {"127.0.0.1" => false, "0.0.0.0" => true, _ => false});
+            this.WhenActivated(d =>
+            {
+                // General
+                this.Bind(ViewModel,
+                        vm => vm.Socks5LocalPort,
+                        v => v.Socks5PortTextBox.Text,
+                        vm => vm.ToString(),
+                        _ => CheckPorts(Socks5PortTextBox, 2801))
+                    .DisposeWith(d);
 
-            BindCheckBox(ResolveServerHostnameCheckBox, c => Global.Settings.ResolveServerHostname = c, Global.Settings.ResolveServerHostname);
+                this.Bind(ViewModel, vm => vm.HTTPLocalPort, v => v.HTTPPortTextBox.Text, vm => vm.ToString(), _ => CheckPorts(HTTPPortTextBox, 2802))
+                    .DisposeWith(d);
 
-            BindRadioBox(ICMPingRadioBtn, _ => { }, !Global.Settings.ServerTCPing);
+                this.Bind(ViewModel,
+                        vm => vm.LocalAddress,
+                        v => v.AllowDevicesCheckBox.Checked,
+                        vmToViewConverterOverride: BoolLocalAddressConverter.LocalAddressToBoolConverter.Instance,
+                        viewToVMConverterOverride: BoolLocalAddressConverter.BoolToLocalAddressConverter.Instance)
+                    .DisposeWith(d);
 
-            BindRadioBox(TCPingRadioBtn, c => Global.Settings.ServerTCPing = c, Global.Settings.ServerTCPing);
+                this.Bind(ViewModel, vm => vm.ResolveServerHostname, v => v.ResolveServerHostnameCheckBox.Checked).DisposeWith(d);
+                this.Bind(ViewModel, vm => vm.ServerTCPing, v => v.TCPingRadioBtn.Checked).DisposeWith(d);
+                this.OneWayBind(ViewModel, vm => vm.ServerTCPing, v => v.ICMPingRadioBtn.Checked, b => !b).DisposeWith(d);
+            });
 
             BindTextBox<int>(ProfileCountTextBox, i => i > -1, i => Global.Settings.ProfileCount = i, Global.Settings.ProfileCount);
             BindTextBox<int>(DetectionTickTextBox,
@@ -257,6 +282,8 @@ namespace Netch.Forms
 
             #region Save
 
+            Global.Settings.Set(ViewModel);
+
             foreach (var pair in _saveActions)
                 pair.Value.Invoke(pair.Key);
 
@@ -334,5 +361,15 @@ namespace Netch.Forms
         }
 
         #endregion
+
+        [NotNull]
+        object? IViewFor.ViewModel
+        {
+            get => ViewModel;
+            set => ViewModel = (Setting?) value;
+        }
+
+        [NotNull]
+        public Setting? ViewModel { get; set; }
     }
 }
