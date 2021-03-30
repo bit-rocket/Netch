@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Reactive.Disposables;
+using System.Reactive.Linq;
 using System.Windows.Forms;
 using Netch.Models;
 using Netch.Properties;
@@ -45,7 +46,7 @@ namespace Netch.Forms
                 return ushort.TryParse(sender.Text, out var p) ? p : defaultValue;
             }
 
-            this.WhenActivated(d =>
+            this.WhenActivated(disposable =>
             {
                 // General
                 this.Bind(ViewModel,
@@ -53,71 +54,61 @@ namespace Netch.Forms
                         v => v.Socks5PortTextBox.Text,
                         vm => vm.ToString(),
                         _ => CheckPorts(Socks5PortTextBox, 2801))
-                    .DisposeWith(d);
+                    .DisposeWith(disposable);
 
                 this.Bind(ViewModel, vm => vm.HTTPLocalPort, v => v.HTTPPortTextBox.Text, vm => vm.ToString(), _ => CheckPorts(HTTPPortTextBox, 2802))
-                    .DisposeWith(d);
+                    .DisposeWith(disposable);
 
                 this.Bind(ViewModel,
                         vm => vm.LocalAddress,
                         v => v.AllowDevicesCheckBox.Checked,
                         vmToViewConverterOverride: BoolLocalAddressConverter.LocalAddressToBoolConverter.Instance,
                         viewToVMConverterOverride: BoolLocalAddressConverter.BoolToLocalAddressConverter.Instance)
-                    .DisposeWith(d);
+                    .DisposeWith(disposable);
 
-                this.Bind(ViewModel, vm => vm.ResolveServerHostname, v => v.ResolveServerHostnameCheckBox.Checked).DisposeWith(d);
-                this.Bind(ViewModel, vm => vm.ServerTCPing, v => v.TCPingRadioBtn.Checked).DisposeWith(d);
-                this.OneWayBind(ViewModel, vm => vm.ServerTCPing, v => v.ICMPingRadioBtn.Checked, b => !b).DisposeWith(d);
+                this.Bind(ViewModel, vm => vm.ResolveServerHostname, v => v.ResolveServerHostnameCheckBox.Checked).DisposeWith(disposable);
+                this.Bind(ViewModel, vm => vm.ServerTCPing, v => v.TCPingRadioBtn.Checked).DisposeWith(disposable);
+                this.OneWayBind(ViewModel, vm => vm.ServerTCPing, v => v.ICMPingRadioBtn.Checked, b => !b).DisposeWith(disposable);
+                this.Bind(ViewModel,
+                        vm => vm.ProfileCount,
+                        v => v.ProfileCountTextBox.Text,
+                        v => v.ToString(),
+                        v => uint.TryParse(v, out var c) ? (int) c : 0)
+                    .DisposeWith(disposable);
+
+                this.Bind(ViewModel,
+                        vm => vm.DetectionTick,
+                        v => v.DetectionTickTextBox.Text,
+                        v => v.ToString(),
+                        v => int.TryParse(v, out var c) && ServerHelper.DelayTestHelper.Range.InRange(c) ? c : -1)
+                    .DisposeWith(disposable);
+
+                this.Bind(ViewModel,
+                        vm => vm.StartedPingInterval,
+                        v => v.StartedPingIntervalTextBox.Text,
+                        v => v.ToString(),
+                        v => int.TryParse(v, out var i) && i >= -1 ? i : -1)
+                    .DisposeWith(disposable);
+
+                STUN_ServerComboBox.Items.AddRange(ReadSTUNs());
+
+                object[] ReadSTUNs()
+                {
+                    try
+                    {
+                        return File.ReadLines("bin\\stun.txt").Cast<object>().ToArray();
+                    }
+                    catch (Exception e)
+                    {
+                        Logging.Warning($"Load stun.txt failed: {e.Message}");
+                        return new object[0];
+                    }
+                }
+
+                this.Bind(ViewModel, vm => vm.STUN_Server, v => v.STUN_ServerComboBox.Text);
+                LanguageComboBox.Items.AddRange(i18N.GetTranslateList().Cast<object>().ToArray());
+                this.Bind(ViewModel, vm => vm.Language, v => v.LanguageComboBox.SelectedItem, v => v, v => (string) v).DisposeWith(disposable);
             });
-
-            BindTextBox<int>(ProfileCountTextBox, i => i > -1, i => Global.Settings.ProfileCount = i, Global.Settings.ProfileCount);
-            BindTextBox<int>(DetectionTickTextBox,
-                i => ServerHelper.DelayTestHelper.Range.InRange(i),
-                i => Global.Settings.DetectionTick = i,
-                Global.Settings.DetectionTick);
-
-            BindTextBox<int>(StartedPingIntervalTextBox,
-                _ => true,
-                i => Global.Settings.StartedPingInterval = i,
-                Global.Settings.StartedPingInterval);
-
-            object[]? stuns;
-            try
-            {
-                stuns = File.ReadLines("bin\\stun.txt").Cast<object>().ToArray();
-            }
-            catch (Exception e)
-            {
-                Logging.Warning($"Load stun.txt failed: {e.Message}");
-                stuns = null;
-            }
-
-            BindComboBox(STUN_ServerComboBox,
-                s =>
-                {
-                    var split = s.SplitRemoveEmptyEntriesAndTrimEntries(':');
-                    if (!split.Any())
-                        return false;
-
-                    var port = split.ElementAtOrDefault(1);
-                    if (port != null)
-                        if (!ushort.TryParse(split[1], out _))
-                            return false;
-
-                    return true;
-                },
-                o =>
-                {
-                    var split = o.ToString().SplitRemoveEmptyEntriesAndTrimEntries(':');
-                    Global.Settings.STUN_Server = split[0];
-
-                    var port = split.ElementAtOrDefault(1);
-                    Global.Settings.STUN_Server_Port = port != null ? ushort.Parse(port) : 3478;
-                },
-                Global.Settings.STUN_Server + ":" + Global.Settings.STUN_Server_Port,
-                stuns);
-
-            BindListComboBox(LanguageComboBox, o => Global.Settings.Language = o.ToString(), i18N.GetTranslateList(), Global.Settings.Language);
 
             #endregion
 
